@@ -4,33 +4,42 @@ const positions = ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"];
 
 function DraftBoard({ teams, assignPlayerToTeam }) {
     return (
-        <div className="overflow-x-auto">
-            <table className="min-w-full border text-center">
+        <div className="mb-8 overflow-auto">
+            <h2 className="text-xl font-semibold mb-4">Draft Board (Click a slot to assign selected player)</h2>
+            <table className="w-full table-auto border-collapse border border-gray-300">
                 <thead>
                     <tr>
-                        <th className="border p-2 bg-gray-100">Team</th>
+                        <th className="border border-gray-300 px-2 py-1">Team</th>
                         {positions.map((pos) => (
-                            <th key={pos} className="border p-2 bg-gray-100">{pos}</th>
+                            <th key={pos} className="border border-gray-300 px-2 py-1">{pos}</th>
                         ))}
                     </tr>
                 </thead>
                 <tbody>
-                    {teams.map((team, index) => (
-                        <tr key={index}>
-                            <td className="border p-2 font-semibold bg-gray-50">{team.name}</td>
+                    {teams.length === 0 && (
+                        <tr>
+                            <td colSpan={positions.length + 1} className="text-center p-4 text-gray-500">
+                                No teams added yet
+                            </td>
+                        </tr>
+                    )}
+                    {teams.map((team, tIndex) => (
+                        <tr key={tIndex} className="text-center">
+                            <td className="border border-gray-300 px-2 py-1 font-semibold">{team.name}</td>
                             {positions.map((pos) => (
                                 <td
                                     key={pos}
-                                    className="border p-2 cursor-pointer hover:bg-blue-100 align-top text-left"
-                                    onClick={() => assignPlayerToTeam(index, pos)}
+                                    className="border border-gray-300 px-2 py-1 cursor-pointer hover:bg-gray-200"
+                                    onClick={() => assignPlayerToTeam(tIndex, pos)}
+                                    title={`Assign player to ${team.name} - ${pos}`}
                                 >
-                                    {team.roster[pos].length > 0 ? (
-                                        <ul className="list-disc ml-4">
-                                            {team.roster[pos].map((player, i) => (
-                                                <li key={i}>{player.name}</li>
-                                            ))}
-                                        </ul>
-                                    ) : "—"}
+                                    {team.roster[pos].length === 0
+                                        ? "-"
+                                        : team.roster[pos].map((p, i) => (
+                                            <div key={i} className="text-sm">
+                                                {p.name}
+                                            </div>
+                                        ))}
                                 </td>
                             ))}
                         </tr>

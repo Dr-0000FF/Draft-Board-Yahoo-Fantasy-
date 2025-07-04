@@ -1,60 +1,42 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
-import YahooFantasy from "yahoo-fantasy";
+import fetch from "node-fetch";
 
 dotenv.config();
 
 const app = express();
 const port = 4000;
 
-// Allow CORS for React frontend
 app.use(cors({ origin: "http://localhost:5173" }));
 
-// YahooFantasy client instance
-const yf = new YahooFantasy(process.env.YAHOO_CLIENT_ID, process.env.YAHOO_CLIENT_SECRET);
-
-// In-memory store for OAuth states (for demo only)
 const stateStore = new Set();
-
-// In-memory store for access token (demo only)
 let userAccessToken = null;
 
 app.get("/", (req, res) => {
-    res.send("⚡ Fantasy API is live! Use /auth to login and /players to fetch players");
+    res.send("⚡ Fantasy API is live! Use /auth to login and /all-players");
 });
 
-// Step 1: Redirect to Yahoo OAuth login
 app.get("/auth", (req, res) => {
     const clientId = process.env.YAHOO_CLIENT_ID;
     const redirectUri = encodeURIComponent(process.env.YAHOO_CALLBACK);
-    const scope = "fspt-r"; // read-only fantasy sports
-    const state = crypto.randomBytes(16).toString("hex"); // secure random state
+    const scope = "fspt-r";
+    const state = crypto.randomBytes(16).toString("hex");
 
-    // Store state for validation later
     stateStore.add(state);
 
     const authUrl = `https://api.login.yahoo.com/oauth2/request_auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${state}`;
 
-    console.log("Redirecting user to:", authUrl);
-
+    console.log("🔗 Redirecting to Yahoo:", authUrl);
     res.redirect(authUrl);
 });
 
-// Step 2: OAuth callback - exchange code for access token
 app.get("/auth/callback", async (req, res) => {
     const { code, state } = req.query;
 
-    if (!code || !state) {
-        return res.status(400).send("Missing code or state in callback");
-    }
-
-    // Verify state is valid and remove it from store to prevent reuse
-    if (!stateStore.has(state)) {
-        return res.status(400).send("Invalid or expired state");
-    }
+    if (!code || !state) return res.status(400).send("Missing code or state");
+    if (!stateStore.has(state)) return res.status(400).send("Invalid or expired state");
     stateStore.delete(state);
 
     try {
@@ -72,9 +54,9 @@ app.get("/auth/callback", async (req, res) => {
                 "Content-Type": "application/x-www-form-urlencoded",
                 Authorization:
                     "Basic " +
-                    Buffer.from(`${process.env.YAHOO_CLIENT_ID}:${process.env.YAHOO_CLIENT_SECRET}`).toString(
-                        "base64"
-                    ),
+                    Buffer.from(
+                        `${process.env.YAHOO_CLIENT_ID}:${process.env.YAHOO_CLIENT_SECRET}`
+                    ).toString("base64"),
             },
             body: tokenParams.toString(),
         });
@@ -85,61 +67,97 @@ app.get("/auth/callback", async (req, res) => {
         }
 
         const tokenData = await tokenRes.json();
-
         userAccessToken = tokenData.access_token;
-        yf.setUserToken(userAccessToken);
-        console.log("✅ Access token obtained and set");
 
-        // Redirect back to frontend (adjust if needed)
+        console.log("✅ Access token obtained and set");
         res.redirect("http://localhost:5173");
     } catch (error) {
-        console.error("❌ Token exchange failed:", error);
+        console.error("❌ OAuth token exchange failed:", error.message);
         res.status(500).send("OAuth token exchange failed: " + error.message);
     }
 });
 
-// Get players - requires user to be authenticated
-app.get("/players", async (req, res) => {
-    if (!userAccessToken) {
-        return res.status(401).json({ error: "User not authenticated" });
-    }
+app.get("/all-players", async (req, res) => {
+    if (!userAccessToken) return res.status(401).json({ error: "User not authenticated" });
 
     try {
-        yf.setUserToken(userAccessToken);
+        const gameKey = "nfl"; // NFL game key
+        const count = 25;      // Batch size adjusted to 25 for API limits
+        let start = 0;
+        let allPlayers = [];
+        let hasMore = true;
 
-        // Get NFL game info for user
-        const games = await yf.user.games();
-        const nflGame = games.find((g) => g.code === "nfl");
-        if (!nflGame) throw new Error("No NFL game found");
+        console.log("Fetching all NFL players from Yahoo API...");
 
-        // Get user's leagues for NFL game
-        const leagues = await yf.user.leagues(nflGame.game_key);
-        if (!leagues.length) throw new Error("No NFL leagues found");
+        while (hasMore) {
+            console.log(`Fetching batch starting at ${start}`);
 
-        const leagueKey = leagues[0].league_key;
+            const url = `https://fantasysports.yahooapis.com/fantasy/v2/game/${gameKey}/players?start=${start}&count=${count}&format=json`;
 
-        // Get players for that league
-        const leaguePlayers = await yf.league.players(leagueKey, {
-            count: 100,
-            start: 0,
-        });
+            const response = await fetch(url, {
+                headers: {
+                    Authorization: `Bearer ${userAccessToken}`,
+                },
+            });
 
-        // Simplify data for frontend
-        const simplified = leaguePlayers.map((p) => ({
-            id: p.player_id,
-            name: p.name.full,
-            position: p.display_position,
-            team: p.editorial_team_abbr,
-            byeWeek: p.bye_weeks?.week || "—",
-        }));
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Failed fetching all players: ${text}`);
+            }
 
-        res.json(simplified);
+            const data = await response.json();
+
+            const playersObj = data?.fantasy_content?.game?.[1]?.players;
+            if (!playersObj) {
+                console.warn("No players data found in response");
+                break;
+            }
+
+            const playerEntries = Object.values(playersObj).filter((p) => p?.player);
+
+            const playersBatch = playerEntries
+                .map((p) => {
+                    const playerData = p.player?.[0];
+                    if (!Array.isArray(playerData)) return null;
+
+                    const getField = (key) =>
+                        playerData.find((item) => Object.prototype.hasOwnProperty.call(item, key))?.[key];
+
+                    const id = getField("player_id");
+                    const name = getField("name")?.full;
+                    const position = getField("display_position") || "—";
+                    const team = getField("editorial_team_abbr") || "—";
+                    const byeWeek = getField("bye_weeks")?.week || "—";
+
+                    if (!id || !name) return null;
+
+                    return { id, name, position, team, byeWeek };
+                })
+                .filter(Boolean);
+
+            console.log(`Fetched ${playersBatch.length} players in batch starting at ${start}`);
+
+            allPlayers = allPlayers.concat(playersBatch);
+
+            if (playersBatch.length < count) {
+                hasMore = false;
+            } else {
+                start += count;
+            }
+        }
+
+        console.log(`Total players fetched: ${allPlayers.length}`);
+        res.json(allPlayers);
     } catch (error) {
-        console.error("❌ Error fetching players:", error);
+        console.error("❌ Error fetching all players:", error.message);
         res.status(500).json({ error: error.message });
     }
 });
 
+app.get("/status", (req, res) => {
+    res.json({ authenticated: !!userAccessToken });
+});
+
 app.listen(port, () => {
-    console.log(`✅ Server running at http://localhost:${port}`);
+    console.log(`🚀 Server running at http://localhost:${port}`);
 });
