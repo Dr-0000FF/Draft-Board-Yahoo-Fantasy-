@@ -54,9 +54,7 @@ app.get("/auth/callback", async (req, res) => {
                 "Content-Type": "application/x-www-form-urlencoded",
                 Authorization:
                     "Basic " +
-                    Buffer.from(
-                        `${process.env.YAHOO_CLIENT_ID}:${process.env.YAHOO_CLIENT_SECRET}`
-                    ).toString("base64"),
+                    Buffer.from(`${process.env.YAHOO_CLIENT_ID}:${process.env.YAHOO_CLIENT_SECRET}`).toString("base64"),
             },
             body: tokenParams.toString(),
         });
@@ -81,18 +79,18 @@ app.get("/all-players", async (req, res) => {
     if (!userAccessToken) return res.status(401).json({ error: "User not authenticated" });
 
     try {
-        const gameKey = "nfl"; // NFL game key
-        const count = 25;      // Batch size adjusted to 25 for API limits
+        const leagueKey = process.env.YAHOO_LEAGUE_KEY;
+        if (!leagueKey) throw new Error("Missing YAHOO_LEAGUE_KEY in environment");
+
+        const count = 25;
         let start = 0;
         let allPlayers = [];
         let hasMore = true;
 
-        console.log("Fetching all NFL players from Yahoo API...");
+        console.log("Fetching all NFL players with rankings from Yahoo API...");
 
         while (hasMore) {
-            console.log(`Fetching batch starting at ${start}`);
-
-            const url = `https://fantasysports.yahooapis.com/fantasy/v2/game/${gameKey}/players?start=${start}&count=${count}&format=json`;
+            const url = `https://fantasysports.yahooapis.com/fantasy/v2/league/${leagueKey}/players?sort=OR&start=${start}&count=${count}&format=json`;
 
             const response = await fetch(url, {
                 headers: {
@@ -102,44 +100,40 @@ app.get("/all-players", async (req, res) => {
 
             if (!response.ok) {
                 const text = await response.text();
-                throw new Error(`Failed fetching all players: ${text}`);
+                throw new Error(`Failed fetching players: ${text}`);
             }
 
             const data = await response.json();
 
-            const playersObj = data?.fantasy_content?.game?.[1]?.players;
-            if (!playersObj) {
-                console.warn("No players data found in response");
-                break;
-            }
+            const playersObj = data?.fantasy_content?.league?.[1]?.players;
+            if (!playersObj) break;
 
             const playerEntries = Object.values(playersObj).filter((p) => p?.player);
 
-            const playersBatch = playerEntries
-                .map((p) => {
-                    const playerData = p.player?.[0];
-                    if (!Array.isArray(playerData)) return null;
+            const batch = playerEntries
+                .map((entry) => {
+                    const player = entry.player?.[0];
+                    if (!Array.isArray(player)) return null;
 
-                    const getField = (key) =>
-                        playerData.find((item) => Object.prototype.hasOwnProperty.call(item, key))?.[key];
+                    const getField = (key) => player.find((item) => Object.prototype.hasOwnProperty.call(item, key))?.[key];
 
                     const id = getField("player_id");
                     const name = getField("name")?.full;
                     const position = getField("display_position") || "—";
                     const team = getField("editorial_team_abbr") || "—";
                     const byeWeek = getField("bye_weeks")?.week || "—";
+                    const OR = getField("OR") ?? "—";  // Overall Rank
+                    const AR = getField("AR") ?? "—";  // Actual Rank
 
                     if (!id || !name) return null;
 
-                    return { id, name, position, team, byeWeek };
+                    return { id, name, position, team, byeWeek, OR, AR };
                 })
                 .filter(Boolean);
 
-            console.log(`Fetched ${playersBatch.length} players in batch starting at ${start}`);
+            allPlayers = allPlayers.concat(batch);
 
-            allPlayers = allPlayers.concat(playersBatch);
-
-            if (playersBatch.length < count) {
+            if (batch.length < count) {
                 hasMore = false;
             } else {
                 start += count;

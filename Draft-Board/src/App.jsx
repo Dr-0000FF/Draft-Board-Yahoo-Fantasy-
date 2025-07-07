@@ -125,7 +125,7 @@ function App() {
 
   return (
     <div className="p-4 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold text-center mb-6">Fantasy Draft Setup</h1>
+      <h1 className="text-3xl font-bold text-center mb-6">League of Men Draft</h1>
 
       <button
         onClick={handleReset}
@@ -140,16 +140,16 @@ function App() {
         setTeamNameInput={setTeamNameInput}
         handleAddTeam={handleAddTeam}
       />
-      <PlayerForm
-        playerInput={playerInput}
-        setPlayerInput={setPlayerInput}
-        handleAddPlayer={handleAddPlayer}
-      />
       <PlayerPool
         players={players}
         selectedPlayerIndex={selectedPlayerIndex}
         setSelectedPlayerIndex={setSelectedPlayerIndex}
         onSearch={handleSearch}
+      />
+      <PlayerForm
+        playerInput={playerInput}
+        setPlayerInput={setPlayerInput}
+        handleAddPlayer={handleAddPlayer}
       />
     </div>
   );
